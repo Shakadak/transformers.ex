@@ -43,7 +43,7 @@ defmodule Transformer.RwsT do
       (The inverse of `rwsT`.)
 
       ```
-      runRwsT :: RwsT r w s a, r, s -> Result (a, s, [w])
+      runRwsT :: RwsT r w s a, r, s -> m (a, s, [w])
       ```
       """
       def runRwsT(m, r, s), do: m.unRwsT.(r, s, [])
@@ -392,8 +392,17 @@ defmodule Transformer.RwsT do
       def mapM([x | xs], f) do
         CE.compute __MODULE__ do
           let! y = f.(x)
-          let! ys = mapM(xs, f)
-          pure([y | ys])
+          let! ys = mapM xs, f
+          pure [y | ys]
+        end
+      end
+
+      def replicateM(0, _), do: pure([])
+      def replicateM(n, m) when is_integer(n) and n > 0 do
+        CE.compute __MODULE__ do
+          let! x = m
+          let! xs = replicateM n - 1, m
+          pure [x | xs]
         end
       end
 

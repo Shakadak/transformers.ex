@@ -114,7 +114,7 @@ defmodule Transformer.StateT do
         Transformer.StateT.new fn s ->
           CE.compute unquote(dict) do
             let! {a, s2} = runStateT(m, s)
-            runStateT(k.(a), s2)
+            pure! runStateT(k.(a), s2)
           end
         end
       end
@@ -199,8 +199,17 @@ defmodule Transformer.StateT do
       def mapM([x | xs], f) do
         CE.compute __MODULE__ do
           let! y = f.(x)
-          let! ys = mapM(xs, f)
-          pure([y | ys])
+          let! ys = mapM xs, f
+          pure [y | ys]
+        end
+      end
+
+      def replicateM(0, _), do: pure([])
+      def replicateM(n, m) when is_integer(n) and n > 0 do
+        CE.compute __MODULE__ do
+          let! x = m
+          let! xs = replicateM n - 1, m
+          pure [x | xs]
         end
       end
 
