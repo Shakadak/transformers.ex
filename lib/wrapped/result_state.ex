@@ -1,4 +1,4 @@
-defmodule Data.ResultState do
+defmodule Wrapped.ResultState do
   require Transformer.StateT
 
   Transformer.StateT.mk(Base.Result)

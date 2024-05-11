@@ -204,6 +204,26 @@ defmodule Transformer.StateT do
         end
       end
 
+      ### Monad Plus -------------------------------------------------------------------------
+
+      @doc """
+      Applicable only if the parent class has a MonadPlus instance
+      """
+      def mzero do
+        dict = unquote(dict)
+        Transformer.StateT.new fn _ -> dict.mzero() end
+      end
+
+      @doc """
+      Applicable only if the parent class has a MonadPlus instance
+      """
+      def mplus(ml, mr) do
+        dict = unquote(dict)
+        Transformer.StateT.new fn s ->
+          runStateT(ml, s) |> dict.mplus(runStateT(mr, s))
+        end
+      end
+
       ### COMPUTATION EXPRESSION ###
 
       def _Pure(x), do: pure(x)
