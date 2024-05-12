@@ -21,8 +21,6 @@ defmodule Transformers.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:computation_expression, git: "https://github.com/Shakadak/computation_expression.ex"},
-      # {:computation_expression, path: "../computation_expression"},
     ]
   end
 end

@@ -17,9 +17,6 @@ defmodule Transformer.RwsT do
 
     quote location: :keep do
 
-      alias ComputationExpression, as: CE
-      require CE
-
       unquote(require_ast)
 
       @doc """
@@ -61,10 +58,10 @@ defmodule Transformer.RwsT do
       ```
       """
       def evalRwsT(m, r, s) do
-        CE.compute unquote(dict) do
-          let! {a, _, w} = runRwsT(m, r, s)
-          pure {a, w}
-        end
+        runRwsT(m, r, s)
+        |> unquote(dict).bind(fn {a, _, w} ->
+          unquote(dict).pure {a, w}
+        end)
       end
 
       @doc """
@@ -80,10 +77,10 @@ defmodule Transformer.RwsT do
       ```
       """
       def execRwsT(m, r, s) do
-        CE.compute unquote(dict) do
-          let! {_, s2, w} = runRwsT(m, r, s)
-          pure {s2, w}
-        end
+        runRwsT(m, r, s)
+        |> unquote(dict).bind(fn {_, s2, w} ->
+          unquote(dict).pure {s2, w}
+        end)
       end
 
       @doc """
@@ -100,10 +97,10 @@ defmodule Transformer.RwsT do
       defmacro mapRwsT(m, f, dict_n) do
         quote do
           Transformer.RwsT.new fn r, s, w ->
-            CE.compute unquote(dict_n) do
-              let! {a, s2, w2} = unquote(f).(runRwsT(unquote(m), r, s))
-              pure {a, s2, w ++ w2}
-            end
+            unquote(f).(runRwsT(unquote(m), r, s))
+            |> unquote(dict_n).bind(fn {a, s2, w2} ->
+              unquote(dict_n).pure {a, s2, w ++ w2}
+            end)
           end
         end
       end
@@ -139,19 +136,19 @@ defmodule Transformer.RwsT do
 
       def bind(m, k) do
         Transformer.RwsT.new fn r, s, w ->
-          CE.compute unquote(dict) do
-            let! {a, s2, w2} = m.unRwsT.(r, s, w)
-            pure! k.(a).unRwsT.(r, s2, w2)
-          end
+          m.unRwsT.(r, s, w)
+          |> unquote(dict).bind(fn {a, s2, w2} ->
+            k.(a).unRwsT.(r, s2, w2)
+          end)
         end
       end
 
       def lift(m) do
         Transformer.RwsT.new fn _, s, w ->
-          CE.compute unquote(dict) do
-            let! a = m
-            pure {a, s, w}
-          end
+          m
+          |> unquote(dict).bind(fn a ->
+            unquote(dict).pure {a, s, w}
+          end)
         end
       end
 
@@ -263,10 +260,10 @@ defmodule Transformer.RwsT do
       """
       def listens(m, f) do
         Transformer.RwsT.new fn r, s, w ->
-          CE.compute unquote(dict) do
-            let! {a, s2, w2} = runRwsT(m, r, s)
-            pure {{a, f.(w2)}, s2, w ++ w2}
-          end
+          runRwsT(m, r, s)
+          |> unquote(dict).bind(fn {a, s2, w2} ->
+            unquote(dict).pure {{a, f.(w2)}, s2, w ++ w2}
+          end)
         end
       end
 
@@ -285,10 +282,10 @@ defmodule Transformer.RwsT do
       """
       def pass(m) do
         Transformer.RwsT.new fn r, s, w ->
-          CE.compute unquote(dict) do
-            let! {{a, f}, s2, w2} = runRwsT(m, r, s)
-            pure {a, s2, w ++ f.(w2)}
-          end
+          runRwsT(m, r, s)
+          |> unquote(dict).bind(fn {{a, f}, s2, w2} ->
+            unquote(dict).pure {a, s2, w ++ f.(w2)}
+          end)
         end
       end
 
@@ -311,10 +308,10 @@ defmodule Transformer.RwsT do
       """
       def censor(m, f) do
         Transformer.RwsT.new fn r, s, w ->
-          CE.compute unquote(dict) do
-            let! {a, s2, w2} = runRwsT(m, r, s)
-            pure {a, s2, w ++ f.(w2)}
-          end
+          runRwsT(m, r, s)
+          |> unquote(dict).bind(fn {a, s2, w2} ->
+            unquote(dict).pure {a, s2, w ++ f.(w2)}
+          end)
         end
       end
 
@@ -390,19 +387,60 @@ defmodule Transformer.RwsT do
 
       def mapM([], _), do: pure([])
       def mapM([x | xs], f) do
-        CE.compute __MODULE__ do
-          let! y = f.(x)
-          let! ys = mapM xs, f
-          pure [y | ys]
-        end
+        f.(x)
+        |> bind(fn y ->
+          (mapM xs, f)
+          |> bind(fn ys ->
+            pure [y | ys]
+          end)
+        end)
+      end
+
+      def mapM_([], _), do: pure({})
+      def mapM_([x | xs], f) do
+        f.(x) |> bind(fn _ -> mapM_ xs, f end)
       end
 
       def replicateM(0, _), do: pure([])
       def replicateM(n, m) when is_integer(n) and n > 0 do
-        CE.compute __MODULE__ do
-          let! x = m
-          let! xs = replicateM n - 1, m
-          pure [x | xs]
+        m
+        |> bind(fn x ->
+          (replicateM n - 1, m)
+          |> bind(fn xs ->
+            pure [x | xs]
+          end)
+        end)
+      end
+
+      def guard(true), do: pure {}
+      def guard(false), do: mzero()
+
+      defmacro whenM(cnd, m) do
+        quote do
+          case unquote(cnd) do
+            true -> unquote(m)
+            false -> unquote(__MODULE__).pure({})
+          end
+        end
+      end
+
+      ### Monad Plus -------------------------------------------------------------------------
+
+      @doc """
+      Applicable only if the parent class has a MonadPlus instance
+      """
+      def mzero do
+        dict = unquote(dict)
+        Transformer.RwsT.new fn _, _, _ -> dict.mzero() end
+      end
+
+      @doc """
+      Applicable only if the parent class has a MonadPlus instance
+      """
+      def mplus(ml, mr) do
+        dict = unquote(dict)
+        Transformer.RwsT.new fn r, s, w ->
+          ml.unRwsT.(r, s, w) |> dict.mplus(mr.unRwsT.(r, s, w))
         end
       end
 

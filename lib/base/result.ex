@@ -7,9 +7,6 @@ defmodule Base.Result do
 
   @type t(error, ok) :: {:error, error} | {:ok, ok}
 
-  alias ComputationExpression, as: CE
-  require CE
-
   @doc """
   Abstracts away the representation of the ok constructor.
   """
@@ -224,11 +221,25 @@ defmodule Base.Result do
   """
   def mapM([], _), do: pure([])
   def mapM([x | xs], f) do
-    CE.compute __MODULE__ do
-      let! y = f.(x)
-      let! ys = mapM(xs, f)
-      pure [y | ys]
-    end
+    f.(x) |> bind(fn y ->
+      (mapM xs, f) |> bind(fn ys ->
+        pure [y | ys]
+      end)
+    end)
+  end
+
+  def mapM_([], _), do: pure({})
+  def mapM_([x | xs], f) do
+    f.(x) |> bind(fn _ -> mapM_ xs, f end)
+  end
+
+  def replicateM(0, _), do: pure([])
+  def replicateM(n, m) when is_integer(n) and n > 0 do
+    m |> bind(fn x ->
+      (replicateM n - 1, m) |> bind(fn xs ->
+        pure [x | xs]
+      end)
+    end)
   end
 
   @doc """
@@ -238,11 +249,11 @@ defmodule Base.Result do
   def zipWithM([], _, _), do: pure([])
   def zipWithM(_, [], _), do: pure([])
   def zipWithM([x | xs], [y | ys], f) do
-    CE.compute __MODULE__ do
-      let! z = f.(x, y)
-      let! zs = zipWithM(xs, ys, f)
-      pure [z | zs]
-    end
+    f.(x, y) |> bind(fn z ->
+      zipWithM(xs, ys, f) |> bind(fn zs ->
+        pure [z | zs]
+      end)
+    end)
   end
 
   @doc """
@@ -265,16 +276,6 @@ defmodule Base.Result do
   #end
   @spec reduceM(Enumerable.t(a), b, (a, b -> t(e, b))) :: t(e, b) when a: var, b: var, e: var
   def reduceM(xs, z0, f) do
-    assert_result! Enum.reduce(xs, pure(z0), fn x, macc -> bind(macc, fn acc -> f.(x, acc) end) |> IO.inspect(label: "bind") end)
+    assert_result! Enum.reduce(xs, pure(z0), fn x, macc -> bind(macc, fn acc -> f.(x, acc) end) end)
   end
-
-  ### COMPUTATION EXPRESSION ###
-
-  def _Pure(x), do: pure(x)
-
-  def _Bind(x, f), do: bind(x, f)
-
-  def _PureFrom(m), do: m
-
-  def _Zero, do: pure({})
 end

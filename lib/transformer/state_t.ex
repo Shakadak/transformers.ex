@@ -17,9 +17,6 @@ defmodule Transformer.StateT do
 
     quote location: :keep do
 
-      alias ComputationExpression, as: CE
-      require CE
-
       unquote(require_ast)
 
       @doc """
@@ -27,7 +24,7 @@ defmodule Transformer.StateT do
       (The inverse of `rwsT`.)
 
       ```
-      runStateT :: StateT s a -> s -> Result {a, s}
+      runStateT :: StateT s m a -> s -> m {a, s}
       ```
       """
       def runStateT(m, s), do: m.runStateT.(s)
@@ -44,10 +41,8 @@ defmodule Transformer.StateT do
       ```
       """
       def evalStateT(m, s) do
-        CE.compute unquote(dict) do
-          let! {a, _} = runStateT(m, s)
-          pure a
-        end
+        runStateT(m, s)
+        |> unquote(dict).bind(fn {a, _} -> unquote(dict).pure(a) end)
       end
 
       @doc """
@@ -62,10 +57,8 @@ defmodule Transformer.StateT do
       ```
       """
       def execStateT(m, s) do
-        CE.compute unquote(dict) do
-          let! {_, s2} = runStateT(m, s)
-          pure s2
-        end
+        runStateT(m, s)
+        |> unquote(dict).bind(fn {_, s2} -> unquote(dict).pure(s2) end)
       end
 
       @doc """
@@ -91,9 +84,7 @@ defmodule Transformer.StateT do
       ```
       """
       def withStateT(m, f) do
-        Transformer.StateT.new fn s ->
-          runStateT(m, f.(s))
-        end
+        Transformer.StateT.new fn s -> runStateT(m, f.(s)) end
       end
 
       # map :: StateT s a, (a -> b) -> StateT s b
@@ -105,26 +96,19 @@ defmodule Transformer.StateT do
 
       # pure :: a -> StateT s a
       def pure(a) do
-        Transformer.StateT.new fn s ->
-          unquote(dict).pure({a, s})
-        end
+        Transformer.StateT.new fn s -> unquote(dict).pure({a, s}) end
       end
 
       def bind(m, k) do
         Transformer.StateT.new fn s ->
-          CE.compute unquote(dict) do
-            let! {a, s2} = runStateT(m, s)
-            pure! runStateT(k.(a), s2)
-          end
+          runStateT(m, s)
+          |> unquote(dict).bind(fn {a, s2} -> runStateT(k.(a), s2) end)
         end
       end
 
       def lift(m) do
         Transformer.StateT.new fn s ->
-          CE.compute unquote(dict) do
-            let! a = m
-            pure {a, s}
-          end
+          m |> unquote(dict).bind(fn a -> unquote(dict).pure {a, s} end)
         end
       end
 
@@ -197,19 +181,36 @@ defmodule Transformer.StateT do
 
       def mapM([], _), do: pure([])
       def mapM([x | xs], f) do
-        CE.compute __MODULE__ do
-          let! y = f.(x)
-          let! ys = mapM xs, f
-          pure [y | ys]
-        end
+        f.(x) |> bind(fn y ->
+          (mapM xs, f) |> bind(fn ys ->
+            pure [y | ys]
+          end)
+        end)
+      end
+
+      def mapM_([], _), do: pure({})
+      def mapM_([x | xs], f) do
+        f.(x) |> bind(fn _ -> mapM_ xs, f end)
       end
 
       def replicateM(0, _), do: pure([])
       def replicateM(n, m) when is_integer(n) and n > 0 do
-        CE.compute __MODULE__ do
-          let! x = m
-          let! xs = replicateM n - 1, m
-          pure [x | xs]
+        m |> bind(fn x ->
+          (replicateM n - 1, m) |> bind(fn xs ->
+            pure [x | xs]
+          end)
+        end)
+      end
+
+      def guard(true), do: pure {}
+      def guard(false), do: mzero()
+
+      defmacro whenM(cnd, m) do
+        quote do
+          case unquote(cnd) do
+            true -> unquote(m)
+            false -> unquote(__MODULE__).pure({})
+          end
         end
       end
 
@@ -232,16 +233,6 @@ defmodule Transformer.StateT do
           runStateT(ml, s) |> dict.mplus(runStateT(mr, s))
         end
       end
-
-      ### COMPUTATION EXPRESSION ###
-
-      def _Pure(x), do: pure(x)
-
-      def _Bind(x, f), do: bind(x, f)
-
-      def _PureFrom(m), do: m
-
-      def _Zero, do: _Pure({})
     end
   end
 end
