@@ -1,13 +1,21 @@
 defmodule Transformer.StateT do
   # Transformer.Monad.Trans.State.Strict
 
-  @enforce_keys [:runStateT]
-  defstruct [:runStateT]
-
   # rwsT :: s -> m (a, s)) -> StateT s m a
-  def new(f) when is_function(f, 1) do
-    %__MODULE__{runStateT: f}
+  defmacro mkStateT(f) do
+    f
   end
+
+  @doc """
+  Unwrap an StateT computation as a function.
+  (The inverse of `rwsT`.)
+
+  ```
+  runStateT :: StateT s m a -> s -> m {a, s}
+  ```
+  """
+  #def runStateT(m, s), do: m.runStateT.(s |> tap(&IO.inspect(get_in(&1, [Access.key!(:varMap), 0, Access.key(:values)]), label: "runStateT(_, s)")))
+  defmacro runStateT(m, s), do: (quote do unquote(m).(unquote(s)) end)
 
   defmacro mk(dict) do
     require_ast = 
@@ -19,15 +27,7 @@ defmodule Transformer.StateT do
 
       unquote(require_ast)
 
-      @doc """
-      Unwrap an StateT computation as a function.
-      (The inverse of `rwsT`.)
-
-      ```
-      runStateT :: StateT s m a -> s -> m {a, s}
-      ```
-      """
-      def runStateT(m, s), do: m.runStateT.(s)
+      require Transformer.StateT
 
       @doc """
       Evaluate a computation with the given initial state,
@@ -41,7 +41,7 @@ defmodule Transformer.StateT do
       ```
       """
       def evalStateT(m, s) do
-        runStateT(m, s)
+        Transformer.StateT.runStateT(m, s)
         |> unquote(dict).bind(fn {a, _} -> unquote(dict).pure(a) end)
       end
 
@@ -57,7 +57,7 @@ defmodule Transformer.StateT do
       ```
       """
       def execStateT(m, s) do
-        runStateT(m, s)
+        Transformer.StateT.runStateT(m, s)
         |> unquote(dict).bind(fn {_, s2} -> unquote(dict).pure(s2) end)
       end
 
@@ -73,7 +73,7 @@ defmodule Transformer.StateT do
       ```
       """
       def mapStateT(m, f) do
-        Transformer.StateT.new(fn s -> f.(runStateT(m, s)) end)
+        Transformer.StateT.mkStateT(fn s -> f.(Transformer.StateT.runStateT(m, s)) end)
       end
 
       @doc """
@@ -84,30 +84,54 @@ defmodule Transformer.StateT do
       ```
       """
       def withStateT(m, f) do
-        Transformer.StateT.new fn s -> runStateT(m, f.(s)) end
+        Transformer.StateT.mkStateT fn s -> Transformer.StateT.runStateT(m, f.(s)) end
       end
+
+      ### Functor
 
       # map :: StateT s a, (a -> b) -> StateT s b
       def map(m, f) do
-        Transformer.StateT.new fn s ->
-          unquote(dict).map(runStateT(m, s), fn {a, s2} -> {f.(a), s2} end)
+        Transformer.StateT.mkStateT fn s ->
+          unquote(dict).map(Transformer.StateT.runStateT(m, s), fn {a, s2} -> {f.(a), s2} end)
         end
       end
+
+      ### Applicative
 
       # pure :: a -> StateT s a
       def pure(a) do
-        Transformer.StateT.new fn s -> unquote(dict).pure({a, s}) end
+        Transformer.StateT.mkStateT fn s -> unquote(dict).pure({a, s}) end
       end
 
-      def bind(m, k) do
-        Transformer.StateT.new fn s ->
-          runStateT(m, s)
-          |> unquote(dict).bind(fn {a, s2} -> runStateT(k.(a), s2) end)
+      def ap(mf, mx) do
+        Transformer.StateT.mkStateT fn s ->
+          Transformer.StateT.runStateT(mf, s)
+          |> unquote(dict).bind(fn {f, s1} ->
+            Transformer.StateT.runStateT(mx, s1)
+            |> unquote(dict).bind(fn {x, s2} ->
+              unquote(dict).pure({f.(x), s2})
+            end)
+          end)
         end
       end
 
+      require Default.Applicative ; Default.Applicative.mk()
+
+      ### Monad
+
+      def bind(m, k) do
+        Transformer.StateT.mkStateT fn s ->
+          Transformer.StateT.runStateT(m, s)
+          |> unquote(dict).bind(fn {a, s2} -> Transformer.StateT.runStateT(k.(a), s2) end)
+        end
+      end
+
+      require Default.Monad ; Default.Monad.mk()
+
+      ### MonadTrans
+
       def lift(m) do
-        Transformer.StateT.new fn s ->
+        Transformer.StateT.mkStateT fn s ->
           m |> unquote(dict).bind(fn a -> unquote(dict).pure {a, s} end)
         end
       end
@@ -122,7 +146,7 @@ defmodule Transformer.StateT do
       ```
       """
       def state(f) do
-        Transformer.StateT.new fn s -> unquote(dict).pure(f.(s)) end
+        Transformer.StateT.mkStateT fn s -> unquote(dict).pure(f.(s)) end
       end
 
       @doc """
@@ -202,9 +226,6 @@ defmodule Transformer.StateT do
         end)
       end
 
-      def guard(true), do: pure {}
-      def guard(false), do: mzero()
-
       defmacro whenM(cnd, m) do
         quote do
           case unquote(cnd) do
@@ -216,22 +237,29 @@ defmodule Transformer.StateT do
 
       ### Monad Plus -------------------------------------------------------------------------
 
+      if function_exported?(unquote(dict), :mzero, 0) or macro_exported?(unquote(dict), :mzero, 0) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
       def mzero do
-        dict = unquote(dict)
-        Transformer.StateT.new fn _ -> dict.mzero() end
+        Transformer.StateT.mkStateT fn _ -> unquote(dict).mzero() end
+      end
       end
 
+      if function_exported?(unquote(dict), :mplus, 2) or macro_exported?(unquote(dict), :mplus, 2) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
       def mplus(ml, mr) do
-        dict = unquote(dict)
-        Transformer.StateT.new fn s ->
-          runStateT(ml, s) |> dict.mplus(runStateT(mr, s))
+        Transformer.StateT.mkStateT fn s ->
+          Transformer.StateT.runStateT(ml, s) |> unquote(dict).mplus(Transformer.StateT.runStateT(mr, s))
         end
+      end
+      end
+
+      if Module.defines?(__MODULE__, {:mzero, 0}) do
+      def guard(true), do: pure {}
+      def guard(false), do: mzero()
       end
     end
   end
