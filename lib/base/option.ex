@@ -1,28 +1,16 @@
 defmodule Base.Option do
-  def __struct__ do
-    %{
-      __struct__: __MODULE__,
-      some: nil,
-      none: :none,
-    }
-  end
-
-  def __struct__(kv) do
-    case kv do
-      [some: x] -> %{__struct__: __MODULE__, some: x}
-      [none: :none] -> %{__struct__: __MODULE__, none: :none}
-    end
-  end
+  @enforce_keys [:tag, :value]
+  defstruct @enforce_keys
 
   @doc """
-  Abstracts away the representation of the ok constructor.
+  Abstracts away the representation of the some constructor.
   """
-  defmacro some(x), do: quote(do: %unquote(__MODULE__){some: unquote(x)})
+  defmacro some(x), do: quote(do: %unquote(__MODULE__){tag: :some, value: unquote(x)})
 
   @doc """
-  Abstracts away the representation of the error constructor.
+  Abstracts away the representation of the none constructor.
   """
-  defmacro none, do: quote(do: %unquote(__MODULE__){none: :none})
+  defmacro none, do: quote(do: %unquote(__MODULE__){tag: :none, value: nil})
 
   def map(some(x), f), do: some(f.(x))
   def map(none(),  _), do: none()
@@ -42,6 +30,6 @@ end
 defimpl Inspect, for: Base.Option do
   import Base.Option
 
-  def inspect(some(x), opts), do: Inspect.Algebra.concat(["Data.Option.some(", Inspect.Algebra.to_doc(x, opts), ")"])
-  def inspect(none(), _opts), do: Inspect.Algebra.concat(["Data.Result.none()"])
+  def inspect(some(x), opts), do: Inspect.Algebra.concat(["Base.Option.some(", Inspect.Algebra.to_doc(x, opts), ")"])
+  def inspect(none(), _opts), do: Inspect.Algebra.concat(["Base.Option.none()"])
 end

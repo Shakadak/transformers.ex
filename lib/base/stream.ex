@@ -1,11 +1,11 @@
 defmodule Base.Stream do
-  def map(m, f), do: Stream.map(m, f)
+  defmacro map(m, f), do: (quote do Stream.map(unquote(m), unquote(f)) end)
 
-  def pure(x), do: Stream.concat([[x]])
+  defmacro pure(x), do: (quote do [unquote(x)] end)
 
-  def bind(m, f), do: Stream.flat_map(m, f)
+  defmacro bind(m, f), do: (quote do Stream.flat_map(unquote(m), unquote(f)) end)
 
-  def mzero, do: Stream.concat([])
+  defmacro mzero, do: (quote do [] end)
 
-  def mplus(l, r), do: Stream.concat(l, r)
+  defmacro mplus(l, r), do: (quote do Stream.concat(unquote(l), unquote(r)) end)
 end

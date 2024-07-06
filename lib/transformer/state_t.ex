@@ -25,6 +25,8 @@ defmodule Transformer.StateT do
 
     quote location: :keep do
 
+      require Transformers.Internal.Macros
+
       unquote(require_ast)
 
       require Transformer.StateT
@@ -237,7 +239,7 @@ defmodule Transformer.StateT do
 
       ### Monad Plus -------------------------------------------------------------------------
 
-      if function_exported?(unquote(dict), :mzero, 0) or macro_exported?(unquote(dict), :mzero, 0) do
+      Transformers.Internal.Macros.optional(unquote(dict), {:mzero, 0}) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
@@ -246,7 +248,7 @@ defmodule Transformer.StateT do
       end
       end
 
-      if function_exported?(unquote(dict), :mplus, 2) or macro_exported?(unquote(dict), :mplus, 2) do
+      Transformers.Internal.Macros.optional(unquote(dict), {:mplus, 2}) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
@@ -257,7 +259,7 @@ defmodule Transformer.StateT do
       end
       end
 
-      if Module.defines?(__MODULE__, {:mzero, 0}) do
+      Transformers.Internal.Macros.locally_optional({:mzero, 0}) do
       def guard(true), do: pure {}
       def guard(false), do: mzero()
       end

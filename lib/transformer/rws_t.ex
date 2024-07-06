@@ -11,11 +11,12 @@ defmodule Transformer.RwsT do
   defmacro mk(dict) do
     require_ast =
       if is_atom(Macro.expand_literals(dict, __CALLER__)) do
-      #if is_atom(dict) do
         quote do require unquote(dict) end
       end
 
     quote location: :keep do
+
+      require Transformers.Internal.Macros
 
       unquote(require_ast)
 
@@ -412,9 +413,6 @@ defmodule Transformer.RwsT do
         end)
       end
 
-      def guard(true), do: pure {}
-      def guard(false), do: mzero()
-
       defmacro whenM(cnd, m) do
         quote do
           case unquote(cnd) do
@@ -426,6 +424,7 @@ defmodule Transformer.RwsT do
 
       ### Monad Plus -------------------------------------------------------------------------
 
+      Transformers.Internal.Macros.optional(unquote(dict), {:mzero, 0}) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
@@ -433,7 +432,9 @@ defmodule Transformer.RwsT do
         dict = unquote(dict)
         Transformer.RwsT.new fn _, _, _ -> dict.mzero() end
       end
+      end
 
+      Transformers.Internal.Macros.optional(unquote(dict), {:mplus, 2}) do
       @doc """
       Applicable only if the parent class has a MonadPlus instance
       """
@@ -442,6 +443,12 @@ defmodule Transformer.RwsT do
         Transformer.RwsT.new fn r, s, w ->
           ml.unRwsT.(r, s, w) |> dict.mplus(mr.unRwsT.(r, s, w))
         end
+      end
+      end
+
+      Transformers.Internal.Macros.locally_optional({:mzero, 0}) do
+      def guard(true), do: pure {}
+      def guard(false), do: mzero()
       end
 
       ### COMPUTATION EXPRESSION ###
