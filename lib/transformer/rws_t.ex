@@ -8,17 +8,14 @@ defmodule Transformer.RwsT do
     %__MODULE__{unRwsT: f}
   end
 
-  defmacro mk(dict) do
-    require_ast =
-      if is_atom(Macro.expand_literals(dict, __CALLER__)) do
-        quote do require unquote(dict) end
-      end
+  defmacro mk(dict, opts \\ []) do
+    {debug?, []} = Keyword.pop(opts, :debug, false)
 
     quote location: :keep do
 
       require Transformers.Internal.Macros
 
-      unquote(require_ast)
+      Transformers.Internal.Macros.require_ast(unquote(dict))
 
       @doc """
       Construct an RwsT computation from a function.
@@ -121,6 +118,8 @@ defmodule Transformer.RwsT do
         end
       end
 
+      ### Functor
+
       # map :: RwsT r w s a, (a -> b) -> RwsT r w s b
       def map(m, f) do
         Transformer.RwsT.new fn r, s, w ->
@@ -128,12 +127,18 @@ defmodule Transformer.RwsT do
         end
       end
 
+      ### Applicative
+
       # pure :: a -> RwsT r w s a
       def pure(a) do
         Transformer.RwsT.new fn _, s, w ->
           unquote(dict).pure({a, s, w})
         end
       end
+
+      require Default.Applicative ; Default.Applicative.mk()
+
+      ### Monad
 
       def bind(m, k) do
         Transformer.RwsT.new fn r, s, w ->
@@ -143,6 +148,10 @@ defmodule Transformer.RwsT do
           end)
         end
       end
+
+      require Default.Monad ; Default.Monad.mk()
+
+      ### MonadTrans
 
       def lift(m) do
         Transformer.RwsT.new fn _, s, w ->
@@ -384,44 +393,6 @@ defmodule Transformer.RwsT do
         Transformer.RwsT.new fn _, s, w -> unquote(dict).pure({f.(s), s, w}) end
       end
 
-      ### Generic operations -----------------------------------------------------------------
-
-      def mapM([], _), do: pure([])
-      def mapM([x | xs], f) do
-        f.(x)
-        |> bind(fn y ->
-          (mapM xs, f)
-          |> bind(fn ys ->
-            pure [y | ys]
-          end)
-        end)
-      end
-
-      def mapM_([], _), do: pure({})
-      def mapM_([x | xs], f) do
-        f.(x) |> bind(fn _ -> mapM_ xs, f end)
-      end
-
-      def replicateM(0, _), do: pure([])
-      def replicateM(n, m) when is_integer(n) and n > 0 do
-        m
-        |> bind(fn x ->
-          (replicateM n - 1, m)
-          |> bind(fn xs ->
-            pure [x | xs]
-          end)
-        end)
-      end
-
-      defmacro whenM(cnd, m) do
-        quote do
-          case unquote(cnd) do
-            true -> unquote(m)
-            false -> unquote(__MODULE__).pure({})
-          end
-        end
-      end
-
       ### Monad Plus -------------------------------------------------------------------------
 
       Transformers.Internal.Macros.optional(unquote(dict), {:mzero, 0}) do
@@ -446,20 +417,12 @@ defmodule Transformer.RwsT do
       end
       end
 
-      Transformers.Internal.Macros.locally_optional({:mzero, 0}) do
+      Transformers.Internal.Macros.local_req mzero: 0 do
       def guard(true), do: pure {}
       def guard(false), do: mzero()
       end
 
-      ### COMPUTATION EXPRESSION ###
-
-      def _Pure(x), do: pure(x)
-
-      def _Bind(x, f), do: bind(x, f)
-
-      def _PureFrom(m), do: m
-
-      def _Zero, do: _Pure({})
     end
+    |> case do x -> if debug? do IO.puts(Macro.to_string(x)) end ; x end
   end
 end

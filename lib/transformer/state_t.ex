@@ -17,29 +17,25 @@ defmodule Transformer.StateT do
   #def runStateT(m, s), do: m.runStateT.(s |> tap(&IO.inspect(get_in(&1, [Access.key!(:varMap), 0, Access.key(:values)]), label: "runStateT(_, s)")))
   defmacro runStateT(m, s), do: (quote do unquote(m).(unquote(s)) end)
 
-  defmacro mk(dict) do
-    require_ast = 
-      if is_atom(Macro.expand_literals(dict, __CALLER__)) do
-        quote do require unquote(dict) end
-      end
+  defmacro mk(dict, opts \\ []) do
+    {debug?, []} = Keyword.pop(opts, :debug, false)
 
     quote location: :keep do
 
       require Transformers.Internal.Macros
 
-      unquote(require_ast)
+      Transformers.Internal.Macros.require_ast(unquote(dict))
 
       require Transformer.StateT
 
       @doc """
-      Evaluate a computation with the given initial state,
-      returning the final value, discarding the final state.
+      Evaluate a state computation with the given initial state
+      and return the final value, discarding the final state.
 
-      ```
-      evalStateT :: Monad m
-               => StateT s m a     -- ^computation to execute
-               -> s                -- ^initial value
-               -> m {a, [w]}      -- ^computation yielding final value and output
+      `evalStateT m s = liftM fst (runStateT m s)`
+
+      ```haskell
+      evalStateT :: (Monad m) => StateT s m a -> s -> m a
       ```
       """
       def evalStateT(m, s) do
@@ -48,14 +44,13 @@ defmodule Transformer.StateT do
       end
 
       @doc """
-      Evaluate a computation with the given initial state,
-      returning the final state, discarding the final value.
+      Evaluate a state computation with the given initial state
+      and return the final value, discarding the final state.
 
-      ```
-      execStateT :: Monad m
-               => StateT s m a  -- ^computation to execute
-               -> s               -- ^initial value
-               -> m {s, [w]}      -- ^computation yielding final state and output
+      `evalStateT m s = liftM fst (runStateT m s)`
+
+      ```haskell
+      execStateT :: (Monad m) => StateT s m a -> s -> m s
       ```
       """
       def execStateT(m, s) do
@@ -64,14 +59,15 @@ defmodule Transformer.StateT do
       end
 
       @doc """
-      Map the inner computation using the given function.
+      Map both the return value and final state of a computation using
+      the given function.
 
       ```
       runStateT(mapStateT(m, f), s) = f.(runStateT(m, s))
       ```
 
       ```
-      mapStateT :: (Monad m, Monad n) => StateT s m a -> (m (a, s, [w]) -> n (b, s, [w'])) -> MonadDict n -> StateT s n b
+      mapStateT :: StateT s m a -> (m (a, s) -> n (b, s)) -> StateT s n b
       ```
       """
       def mapStateT(m, f) do
@@ -80,6 +76,9 @@ defmodule Transformer.StateT do
 
       @doc """
       `withStateT(m, f)` executes action `m` on a state modified by applying `f`.
+
+      `withStateT f m = modify f >> m`
+
 
       ```
       withStateT :: StateT s m a -> (s -> s) -> StateT s m a
@@ -203,66 +202,33 @@ defmodule Transformer.StateT do
         state fn s -> {f.(s), s} end
       end
 
-      ### Generic operations -----------------------------------------------------------------
+      ### Monad Plus -------------------------------------------------------------------------
 
-      def mapM([], _), do: pure([])
-      def mapM([x | xs], f) do
-        f.(x) |> bind(fn y ->
-          (mapM xs, f) |> bind(fn ys ->
-            pure [y | ys]
-          end)
-        end)
+      Transformers.Internal.Macros.optional(unquote(dict), mzero: 0) do
+        @doc """
+        Applicable only if the parent class has a MonadPlus instance
+        """
+        def mzero do
+          Transformer.StateT.mkStateT fn _ -> unquote(dict).mzero() end
+        end
       end
 
-      def mapM_([], _), do: pure({})
-      def mapM_([x | xs], f) do
-        f.(x) |> bind(fn _ -> mapM_ xs, f end)
-      end
-
-      def replicateM(0, _), do: pure([])
-      def replicateM(n, m) when is_integer(n) and n > 0 do
-        m |> bind(fn x ->
-          (replicateM n - 1, m) |> bind(fn xs ->
-            pure [x | xs]
-          end)
-        end)
-      end
-
-      defmacro whenM(cnd, m) do
-        quote do
-          case unquote(cnd) do
-            true -> unquote(m)
-            false -> unquote(__MODULE__).pure({})
+      Transformers.Internal.Macros.optional(unquote(dict), mplus: 2) do
+        @doc """
+        Applicable only if the parent class has a MonadPlus instance
+        """
+        def mplus(ml, mr) do
+          Transformer.StateT.mkStateT fn s ->
+            Transformer.StateT.runStateT(ml, s) |> unquote(dict).mplus(Transformer.StateT.runStateT(mr, s))
           end
         end
       end
 
-      ### Monad Plus -------------------------------------------------------------------------
-
-      Transformers.Internal.Macros.optional(unquote(dict), {:mzero, 0}) do
-      @doc """
-      Applicable only if the parent class has a MonadPlus instance
-      """
-      def mzero do
-        Transformer.StateT.mkStateT fn _ -> unquote(dict).mzero() end
-      end
-      end
-
-      Transformers.Internal.Macros.optional(unquote(dict), {:mplus, 2}) do
-      @doc """
-      Applicable only if the parent class has a MonadPlus instance
-      """
-      def mplus(ml, mr) do
-        Transformer.StateT.mkStateT fn s ->
-          Transformer.StateT.runStateT(ml, s) |> unquote(dict).mplus(Transformer.StateT.runStateT(mr, s))
-        end
-      end
-      end
-
-      Transformers.Internal.Macros.locally_optional({:mzero, 0}) do
-      def guard(true), do: pure {}
-      def guard(false), do: mzero()
+      Transformers.Internal.Macros.local_req mzero: 0 do
+        def guard(true), do: pure {}
+        def guard(false), do: mzero()
       end
     end
+    |> case do x -> if debug? do IO.puts(Macro.to_string(x)) end ; x end
   end
 end

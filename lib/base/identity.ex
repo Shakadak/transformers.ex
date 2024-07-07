@@ -24,14 +24,4 @@ defmodule Base.Identity do
       unquote(f).(unquote(x))
     end
   end
-
-  ### COMPUTATION EXPRESSION ###
-
-  defmacro _Pure(x), do: (quote do unquote(__MODULE__).pure(unquote(x)) end)
-
-  defmacro _Bind(m, f), do: (quote do unquote(__MODULE__).bind(unquote(m), unquote(f)) end)
-
-  defmacro _PureFrom(m), do: m
-
-  defmacro _Zero, do: (quote do {} end)
 end
