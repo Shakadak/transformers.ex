@@ -45,7 +45,7 @@ defmodule Transformer.StateT do
 
       @doc """
       Evaluate a state computation with the given initial state
-      and return the final value, discarding the final state.
+      and return the final state, discarding the final value.
 
       `evalStateT m s = liftM fst (runStateT m s)`
 
@@ -121,9 +121,8 @@ defmodule Transformer.StateT do
       ### Monad
 
       def bind(m, k) do
-        Transformer.StateT.mkStateT fn s ->
-          Transformer.StateT.runStateT(m, s)
-          |> unquote(dict).bind(fn {a, s2} -> Transformer.StateT.runStateT(k.(a), s2) end)
+        fn s ->
+          m.(s) |> unquote(dict).bind(fn {a, s2} -> k.(a).(s2) end)
         end
       end
 
